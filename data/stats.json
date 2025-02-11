@@ -1,0 +1,41 @@
+{
+  "files_processed": [
+    {
+      "timestamp": "2025-02-11T01:02:23.556219",
+      "file_name": "HR_to_Sales_data.csv",
+      "source_department": "HR",
+      "target_department": "Sales",
+      "fields_tokenized": [
+        "Phone Number",
+        "Salary",
+        "Age"
+      ],
+      "records_processed": 10,
+      "tokens_generated": 30
+    },
+    {
+      "timestamp": "2025-02-11T01:20:17.173119",
+      "file_name": "Finance_to_Marketing_employees.csv",
+      "source_department": "Finance",
+      "target_department": "Marketing",
+      "fields_tokenized": [
+        "Salary"
+      ],
+      "records_processed": 150,
+      "tokens_generated": 150
+    },
+    {
+      "timestamp": "2025-02-11T02:58:30.903541",
+      "file_name": "HR_to_Finance_test.csv",
+      "source_department": "HR",
+      "target_department": "Finance",
+      "fields_tokenized": [
+        "Phone Number"
+      ],
+      "records_processed": 2,
+      "tokens_generated": 2
+    }
+  ],
+  "total_records": 162,
+  "total_tokens": 182
+}
