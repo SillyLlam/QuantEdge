@@ -10,6 +10,10 @@ from database import SessionLocal, engine
 from quantum_tokenizer import QuantumTokenizer
 from ai_detector import SensitivityDetector
 from blockchain_manager import BlockchainManager
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
 
 app = FastAPI(title="Quantum-AI Hybrid Tokenization System")
 
@@ -28,9 +32,9 @@ sensitivity_detector = SensitivityDetector()
 blockchain_manager = BlockchainManager()
 
 # JWT settings
-SECRET_KEY = "your-secret-key"  # In production, use environment variable
-ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 30
+SECRET_KEY = os.getenv("SECRET_KEY")
+ALGORITHM = os.getenv("ALGORITHM")
+ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES"))
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 
