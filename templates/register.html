@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Register - Quantum Tokenization</title>
+    <link href="/static/css/auth.css?v={{ range(1, 100000) | random }}" rel="stylesheet">
+</head>
+<body>
+    <div class="auth-card">
+        <div class="auth-side white-side">
+            <h1>Register</h1>
+            {% if error %}
+            <div class="error-message">{{ error }}</div>
+            {% endif %}
+            <form method="POST" action="/register">
+                <div class="form-group">
+                    <input type="text" class="form-control" id="username" name="username" placeholder="Username" required>
+                </div>
+                <div class="form-group">
+                    <input type="email" class="form-control" id="email" name="email" placeholder="Email" required>
+                </div>
+                <div class="form-group">
+                    <input type="password" class="form-control" id="password" name="password" placeholder="Password" required>
+                </div>
+                <button type="submit" class="auth-btn">Register</button>
+            </form>
+        </div>
+        <div class="auth-side blue-side">
+            <h2 class="welcome-text">Welcome back!</h2>
+            <p class="sub-text">Already have an account?</p>
+            <a href="/login" class="switch-action">Login</a>
+        </div>
+    </div>
+</body>
+</html>

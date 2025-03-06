@@ -4,346 +4,189 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Quantum Tokenization</title>
-    <link href="/static/css/styles.css" rel="stylesheet">
+    <link href="/static/css/styles.css?v={{ range(1, 100000) | random }}" rel="stylesheet">
 </head>
 <body>
     <div class="header">
         <div class="container">
-            <h1>Quantum Tokenization</h1>
+            <div class="header-content">
+                <h1>Quantum Tokenization</h1>
+                <div class="user-controls">
+                    <span class="username">{{ user.username }}</span>
+                    <a href="/logout" class="logout-btn">Logout</a>
+                </div>
+            </div>
         </div>
     </div>
 
     <div class="container">
-        <div class="stats-container">
+        <div id="message" class="message-container"></div>
+        
+        <div class="stats-container" style="animation: fadeIn 0.5s ease-out;">
             <div class="stat-card">
-                <div class="stat-label">Total Records Tokenized</div>
+                <div class="stat-label">Total Records Processed</div>
                 <div class="stat-number" id="totalRecords">0</div>
             </div>
             <div class="stat-card">
-                <div class="stat-label">Active Quantum Tokens</div>
+                <div class="stat-label">Active Tokens</div>
                 <div class="stat-number" id="activeTokens">0</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Fields Tokenized</div>
+                <div class="stat-number" id="fieldsTokenized">0</div>
             </div>
         </div>
 
-        <div class="mappings-container">
-            <div class="mappings-header">
-                <h2>Quantum Token Mappings</h2>
-                <div class="field-tabs" id="fieldTabs">
-                    <!-- Field tabs will be dynamically inserted here -->
+        <div class="section-container" style="animation: slideIn 0.5s ease-out;">
+            <div class="section">
+                <h2>Token Mappings</h2>
+                <div class="field-tabs" id="fieldTabs"></div>
+                <div class="mappings-grid" id="tokenMappings">
+                    <div class="mapping-header">
+                        <div>Original Value</div>
+                        <div>Token</div>
+                    </div>
+                    <div class="mapping-content"></div>
                 </div>
             </div>
-            <div class="mappings-grid" id="tokenMappings">
-                <!-- Token mapping cards will be dynamically inserted here -->
+
+            <div class="section">
+                <h2>Recent Files</h2>
+                <div class="files-grid" id="recentFiles"></div>
             </div>
         </div>
     </div>
 
     <script>
-        // Function to update statistics and mappings
-        async function updateStats() {
-            try {
-                const response = await fetch('/stats');
-                const data = await response.json();
-                
-                document.getElementById('totalRecords').textContent = data.total_records.toLocaleString();
-                
-                // Update field tabs
-                const fieldTabs = document.getElementById('fieldTabs');
-                const mappingsGrid = document.getElementById('tokenMappings');
-                
-                // Clear existing content
-                fieldTabs.innerHTML = '';
-                mappingsGrid.innerHTML = '';
-                
-                // Create tabs for each field
-                const fields = Object.keys(data.field_mappings || {});
-                let activeField = localStorage.getItem('activeField') || fields[0];
-                
-                fields.forEach(field => {
-                    const tab = document.createElement('div');
-                    tab.className = `field-tab ${field === activeField ? 'active' : ''}`;
-                    tab.textContent = field;
-                    tab.onclick = () => {
-                        document.querySelectorAll('.field-tab').forEach(t => t.classList.remove('active'));
-                        tab.classList.add('active');
-                        showFieldMappings(field, data.field_mappings[field]);
-                        localStorage.setItem('activeField', field);
-                    };
-                    fieldTabs.appendChild(tab);
-                });
-                
-                // Show mappings for active field
-                if (activeField && data.field_mappings[activeField]) {
-                    showFieldMappings(activeField, data.field_mappings[activeField]);
-                }
-                
-                // Update total tokens count
-                let totalTokens = 0;
-                Object.values(data.field_mappings || {}).forEach(fieldMappings => {
-                    totalTokens += Object.keys(fieldMappings).length;
-                });
-                document.getElementById('activeTokens').textContent = totalTokens.toLocaleString();
-                
-            } catch (error) {
-                console.error('Error updating stats:', error);
-            }
+        // Show error/success messages
+        function showMessage(message, type = 'error') {
+            const messageDiv = document.getElementById('message');
+            const alert = document.createElement('div');
+            alert.className = `alert alert-${type} fade-in`;
+            alert.textContent = message;
+            messageDiv.innerHTML = '';
+            messageDiv.appendChild(alert);
+            setTimeout(() => {
+                alert.classList.add('fade-out');
+                setTimeout(() => messageDiv.removeChild(alert), 500);
+            }, 4500);
         }
-        
-        // Function to display mappings for a specific field
-        function showFieldMappings(field, mappings) {
-            const mappingsGrid = document.getElementById('tokenMappings');
-            mappingsGrid.innerHTML = '';
+
+        // Display mappings for a specific field
+        function displayMappings(field, mappings) {
+            const container = document.getElementById('tokenMappings');
+            const content = container.querySelector('.mapping-content');
             
-            Object.entries(mappings || {}).forEach(([original, token]) => {
-                const card = document.createElement('div');
-                card.className = 'mapping-card';
-                card.innerHTML = `
-                    <div class="field-label">${field}</div>
+            // Store active field in localStorage
+            localStorage.setItem('activeField', field);
+            
+            // Update active tab
+            document.querySelectorAll('.field-tab').forEach(tab => {
+                tab.classList.remove('active');
+                if (tab.textContent === field) {
+                    tab.classList.add('active');
+                }
+            });
+            
+            if (!mappings || Object.keys(mappings).length === 0) {
+                content.innerHTML = `
+                    <div class="empty-state">
+                        <div class="empty-icon">🔍</div>
+                        <div class="empty-text">No mappings available for ${field}</div>
+                    </div>`;
+                return;
+            }
+            
+            // Sort mappings by original value
+            const sortedMappings = Object.entries(mappings).sort((a, b) => a[0].localeCompare(b[0]));
+            
+            content.innerHTML = sortedMappings.map(([original, token]) => `
+                <div class="mapping-row" style="animation: fadeIn 0.3s ease-out;">
                     <div class="original-value">${original}</div>
                     <div class="token-value">${token}</div>
-                `;
-                mappingsGrid.appendChild(card);
-            });
+                </div>
+            `).join('');
         }
 
-        // Update stats every 5 seconds
-        updateStats();
-        setInterval(updateStats, 5000);
-    </script>
-</body>
-</html>
-
-    <script>
-        // Function to show error messages
-        function showError(message) {
-            const messageDiv = document.getElementById('message');
-            messageDiv.innerHTML = `<div class="error">${message}</div>`;
-            setTimeout(() => messageDiv.innerHTML = '', 5000);
-        }
-
-        // Function to update UI with stats
-        async function updateStats() {
+        // Update all data
+        async function updateData() {
             try {
-                const response = await fetch('/stats');
-                if (!response.ok) throw new Error('Failed to fetch stats');
-                const stats = await response.json();
-                
-                document.getElementById('totalFiles').textContent = stats.total_files;
-                document.getElementById('totalRecords').textContent = stats.total_records;
+                console.log('Updating data...'); // Debug log
 
-                const sensitiveFields = document.getElementById('sensitiveFields');
-                sensitiveFields.innerHTML = '';
-                for (const [field, count] of Object.entries(stats.sensitive_fields_found || {})) {
-                    sensitiveFields.innerHTML += `
-                        <div class="field-item">
-                            <span class="field-name">${field}</span>
-                            <span class="field-count">${count} occurrences</span>
-                        </div>
-                    `;
-                }
-            } catch (error) {
-                showError(`Error updating stats: ${error.message}`);
-            }
-        }
+                // Fetch stats
+                const statsResponse = await fetch('/stats');
+                if (!statsResponse.ok) throw new Error('Failed to fetch stats');
+                const stats = await statsResponse.json();
+                console.log('Stats:', stats); // Debug log
 
-        // Function to update UI with token mappings
-        async function updateTokenMappings() {
-            try {
-                const response = await fetch('/token-mappings');
-                if (!response.ok) throw new Error('Failed to fetch token mappings');
-                const mappings = await response.json();
+                // Update stats display
+                document.getElementById('totalRecords').textContent = stats.total_records || 0;
+                document.getElementById('activeTokens').textContent = stats.active_tokens || 0;
+                document.getElementById('fieldsTokenized').textContent = Object.keys(stats.field_stats || {}).length;
 
-                const tokenMappings = document.getElementById('tokenMappings');
-                tokenMappings.innerHTML = '';
-                for (const [field, tokens] of Object.entries(mappings)) {
-                    tokenMappings.innerHTML += `
-                        <div class="field-section">
-                            <div class="field-header">
-                                <h3>${field}</h3>
-                                <span class="field-count">${Object.keys(tokens).length} values</span>
+                // Update recent files
+                const recentFilesDiv = document.getElementById('recentFiles');
+                if (stats.recent_files && stats.recent_files.length > 0) {
+                    recentFilesDiv.innerHTML = stats.recent_files.map(file => `
+                        <div class="file-card ${file.status.toLowerCase()}" style="animation: slideIn 0.3s ease-out;">
+                            <div class="file-name">${file.filename}</div>
+                            <div class="file-stats">
+                                <span>Records: ${file.records}</span>
+                                <span>Status: ${file.status}</span>
                             </div>
-                            <div class="token-list">
-                                ${Object.entries(tokens).map(([value, token]) => `
-                                    <div class="token-item">
-                                        <div class="token-item-content">
-                                            <div class="original-value-section">
-                                                <span class="value-label">Original Value</span>
-                                                <span class="original-value">${value}</span>
-                                            </div>
-                                            <div class="token-value-section">
-                                                <span class="value-label">Quantum Token</span>
-                                                <span class="token-value">${token}</span>
-                                            </div>
-                                        </div>
-                                    </div>
-                                `).join('')}
+                            <div class="file-time">
+                                ${new Date(file.processed_at).toLocaleString()}
                             </div>
+                            ${file.error_message ? `<div class="error-message">${file.error_message}</div>` : ''}
                         </div>
-                    `;
+                    `).join('');
+                } else {
+                    recentFilesDiv.innerHTML = `
+                        <div class="empty-state">
+                            <div class="empty-icon">📁</div>
+                            <div class="empty-text">No files processed yet</div>
+                        </div>`;
+                }
+
+                // Update token mappings
+                const fieldTabs = document.getElementById('fieldTabs');
+                const mappings = stats.token_mappings || {};
+                const fields = Object.keys(mappings);
+
+                if (fields.length > 0) {
+                    // Get or set active field
+                    let activeField = localStorage.getItem('activeField') || fields[0];
+                    if (!fields.includes(activeField)) activeField = fields[0];
+
+                    // Create field tabs
+                    fieldTabs.innerHTML = fields.map(field => `
+                        <div class="field-tab ${field === activeField ? 'active' : ''}" 
+                             onclick="displayMappings('${field}', ${JSON.stringify(mappings[field]).replace(/"/g, '&quot;')})">
+                            ${field}
+                        </div>
+                    `).join('');
+
+                    // Display mappings for active field
+                    displayMappings(activeField, mappings[activeField]);
+                } else {
+                    fieldTabs.innerHTML = '';
+                    document.getElementById('tokenMappings').innerHTML = `
+                        <div class="empty-state">
+                            <div class="empty-icon">🔍</div>
+                            <div class="empty-text">No mappings available</div>
+                        </div>`;
                 }
             } catch (error) {
-                showError(`Error updating token mappings: ${error.message}`);
+                console.error('Error updating data:', error);
+                showMessage('Failed to update data. Please try again later.');
             }
-        }
-
-        // Function to update UI with processed files
-        async function updateProcessedFiles() {
-            try {
-                const response = await fetch('/processed-files');
-                if (!response.ok) throw new Error('Failed to fetch processed files');
-                const data = await response.json();
-
-                const processedFiles = document.getElementById('processedFiles');
-                processedFiles.innerHTML = '';
-                for (const file of data.files) {
-                    processedFiles.innerHTML += `
-                        <div class="file-item">${file}</div>
-                    `;
-                }
-            } catch (error) {
-                showError(`Error updating processed files: ${error.message}`);
-            }
-        }
-
-        // Function to refresh all data
-        async function refreshData() {
-            await Promise.all([
-                updateStats(),
-                updateTokenMappings(),
-                updateProcessedFiles()
-            ]);
         }
 
         // Initial load
-        refreshData();
+        updateData();
 
-        // Auto-refresh every 5 seconds
-        setInterval(refreshData, 5000);
-    </script>
-</body>
-</html>
-                <div class="card-header">
-                    <h5 class="mb-0">Token Mappings</h5>
-                </div>
-                <div class="card-body">
-                    <div class="token-table">
-                        <table class="table table-striped">
-                            <thead>
-                                <tr>
-                                    <th>Field</th>
-                                    <th>Original Value</th>
-                                    <th>Token</th>
-                                </tr>
-                            </thead>
-                            <tbody id="tokenMappings">
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <script>
-        let accessToken = null;
-
-        async function login(event) {
-            event.preventDefault();
-            const username = document.getElementById('username').value;
-            const password = document.getElementById('password').value;
-
-            try {
-                const response = await fetch('/token', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/x-www-form-urlencoded',
-                    },
-                    body: `username=${encodeURIComponent(username)}&password=${encodeURIComponent(password)}`
-                });
-
-                if (!response.ok) {
-                    throw new Error('Login failed');
-                }
-
-                const data = await response.json();
-                accessToken = data.access_token;
-                
-                // Show dashboard and hide login form
-                document.getElementById('loginForm').style.display = 'none';
-                document.getElementById('dashboard').style.display = 'block';
-                
-                // Load initial data
-                refreshData();
-                
-            } catch (error) {
-                alert('Login failed. Please check your credentials.');
-            }
-        }
-
-        async function refreshData() {
-            if (!accessToken) return;
-
-            try {
-                // Fetch statistics
-                const statsResponse = await fetch('/api/stats', {
-                    headers: {
-                        'Authorization': `Bearer ${accessToken}`
-                    }
-                });
-                const stats = await statsResponse.json();
-
-                // Update statistics
-                document.getElementById('totalFiles').textContent = stats.files_processed.length;
-                document.getElementById('totalRecords').textContent = stats.total_records;
-                document.getElementById('totalTokens').textContent = stats.total_tokens;
-
-                // Update recent activity
-                const recentActivity = document.getElementById('recentActivity');
-                recentActivity.innerHTML = stats.files_processed
-                    .slice(-5)
-                    .reverse()
-                    .map(file => `
-                        <tr>
-                            <td>${new Date(file.timestamp).toLocaleString()}</td>
-                            <td>${file.file_name}</td>
-                            <td>${file.source_department} → ${file.target_department}</td>
-                            <td>${file.fields_tokenized.join(', ')}</td>
-                            <td>${file.records_processed}</td>
-                        </tr>
-                    `)
-                    .join('');
-
-                // Fetch token mappings
-                const mappingsResponse = await fetch('/api/token-mappings', {
-                    headers: {
-                        'Authorization': `Bearer ${accessToken}`
-                    }
-                });
-                const mappings = await mappingsResponse.json();
-
-                // Update token mappings
-                const tokenMappings = document.getElementById('tokenMappings');
-                tokenMappings.innerHTML = Object.entries(mappings)
-                    .flatMap(([field, values]) =>
-                        Object.entries(values)
-                            .map(([original, token]) => `
-                                <tr>
-                                    <td>${field}</td>
-                                    <td>${original}</td>
-                                    <td>${token}</td>
-                                </tr>
-                            `)
-                    )
-                    .join('');
-
-            } catch (error) {
-                console.error('Error refreshing data:', error);
-                alert('Failed to refresh data. Please try again.');
-            }
-        }
-
-        // Auto-refresh every 30 seconds
-        setInterval(refreshData, 30000);
+        // Refresh every 2 seconds
+        setInterval(updateData, 2000);
     </script>
 </body>
 </html>

@@ -1,11 +1,14 @@
 import os
 import pandas as pd
-import json
 import shutil
 from datetime import datetime
 import logging
+import time
 from tokenization_rules import TokenizationRules
 from quantum_tokenizer import QuantumTokenizer
+from models import TokenMapping, ProcessedFile
+from backend.database import db_session
+from sqlalchemy import or_
 
 # Set up logging
 logging.basicConfig(
@@ -23,8 +26,6 @@ class FileProcessor:
         self.input_dir = os.path.join(data_dir, 'input')
         self.processed_dir = os.path.join(data_dir, 'processed')
         self.archive_dir = os.path.join(data_dir, 'archive')
-        self.stats_file = os.path.join(data_dir, 'stats.json')
-        self.mappings_file = os.path.join(data_dir, 'token_mappings.json')
         
         self.tokenizer = QuantumTokenizer()
         
@@ -32,51 +33,78 @@ class FileProcessor:
         for dir_path in [self.input_dir, self.processed_dir, self.archive_dir]:
             os.makedirs(dir_path, exist_ok=True)
             logging.info(f"Created/verified directory: {dir_path}")
-        
-        # Initialize files
-        self.load_or_create_files()
     
-    def load_or_create_files(self):
-        if not os.path.exists(self.stats_file):
-            self.save_stats({'total_files': 0, 'total_records': 0, 'sensitive_fields_found': {}})
-        if not os.path.exists(self.mappings_file):
-            self.save_mappings({})
-    
-    def load_stats(self):
+    def get_or_create_token(self, field, value, source_dept, dest_dept):
+        """Get existing token or create a new one"""
         try:
-            with open(self.stats_file, 'r') as f:
-                return json.load(f)
-        except:
-            return {'total_files': 0, 'total_records': 0, 'sensitive_fields_found': {}}
-    
-    def save_stats(self, stats):
-        with open(self.stats_file, 'w') as f:
-            json.dump(stats, f, indent=4)
-    
-    def load_mappings(self):
-        try:
-            with open(self.mappings_file, 'r') as f:
-                return json.load(f)
-        except:
-            return {}
-    
-    def save_mappings(self, mappings):
-        with open(self.mappings_file, 'w') as f:
-            json.dump(mappings, f, indent=4)
-    
-    def generate_quantum_token(self, field, value):
-        token_a, _ = self.tokenizer.generate_token_pair()
-        return f'QT_{token_a[:12]}'
+            # Try to find existing token
+            token_mapping = db_session.query(TokenMapping).filter(
+                TokenMapping.field_name == field,
+                TokenMapping.original_value == str(value),
+                or_(
+                    TokenMapping.source_dept == source_dept,
+                    TokenMapping.source_dept.is_(None)
+                ),
+                or_(
+                    TokenMapping.dest_dept == dest_dept,
+                    TokenMapping.dest_dept.is_(None)
+                )
+            ).first()
+            
+            if token_mapping:
+                # Update usage statistics
+                token_mapping.last_used_at = datetime.utcnow()
+                token_mapping.usage_count += 1
+                db_session.commit()
+                return token_mapping.token_value
+            
+            # Create new token if not found
+            token_a, _ = self.tokenizer.generate_token_pair()
+            token_value = f'QT_{token_a[:12]}'
+            
+            new_mapping = TokenMapping(
+                field_name=field,
+                original_value=str(value),
+                token_value=token_value,
+                source_dept=source_dept,
+                dest_dept=dest_dept,
+                usage_count=1,
+                last_used_at=datetime.utcnow()
+            )
+            
+            db_session.add(new_mapping)
+            db_session.commit()
+            
+            return token_value
+            
+        except Exception as e:
+            db_session.rollback()
+            logging.error(f"Error in get_or_create_token: {str(e)}")
+            raise
     
     def process_file(self, filename):
+        start_time = time.time()
+        
         try:
             file_path = os.path.join(self.input_dir, filename)
             logging.info(f"Processing file: {file_path}")
+            
+            # Create ProcessedFile record
+            processed_file = ProcessedFile(
+                filename=filename,
+                status='processing',
+                created_at=datetime.utcnow()
+            )
+            db_session.add(processed_file)
+            db_session.commit()
             
             # Get departments from filename
             source_dept, dest_dept = TokenizationRules.parse_filename(filename)
             if not source_dept or not dest_dept:
                 raise ValueError(f"Invalid filename format: {filename}")
+            
+            processed_file.source_dept = source_dept
+            processed_file.dest_dept = dest_dept
             
             # Get rules
             rules = TokenizationRules.get_rules(source_dept, dest_dept)
@@ -86,39 +114,25 @@ class FileProcessor:
             df = pd.read_csv(file_path)
             logging.info(f"Read {len(df)} rows")
             
-            # Load mappings and stats
-            mappings = self.load_mappings()
-            stats = self.load_stats()
-            
-            # Update stats
-            stats['total_files'] += 1
-            stats['total_records'] += len(df)
-            
             # Process fields
             processed_df = df.copy()
+            fields_tokenized = {}
+            
             for field in df.columns:
-                # Update field stats
-                if field not in stats['sensitive_fields_found']:
-                    stats['sensitive_fields_found'][field] = 0
-                stats['sensitive_fields_found'][field] += len(df[df[field].notna()])
-                
-                # Process based on rules
                 if field in rules['tokenize']:
                     logging.info(f"Tokenizing field: {field}")
-                    if field not in mappings:
-                        mappings[field] = {}
+                    fields_tokenized[field] = 0
                     
                     # Process each unique value
                     for value in df[field].unique():
                         if pd.notna(value):
-                            value_str = str(value)
-                            if value_str not in mappings[field]:
-                                token = self.generate_quantum_token(field, value_str)
-                                mappings[field][value_str] = token
-                                logging.info(f"New token: {value_str} -> {token}")
-                            
-                            # Replace value with token
-                            processed_df.loc[df[field] == value, field] = mappings[field][value_str]
+                            try:
+                                token = self.get_or_create_token(field, value, source_dept, dest_dept)
+                                mask = df[field] == value
+                                processed_df.loc[mask, field] = token
+                                fields_tokenized[field] += mask.sum()
+                            except Exception as e:
+                                logging.error(f"Error tokenizing value in {field}: {str(e)}")
                 else:
                     logging.info(f"Passing through field: {field}")
             
@@ -133,9 +147,13 @@ class FileProcessor:
             shutil.move(file_path, archive_path)
             logging.info(f"Archived to: {archive_path}")
             
-            # Save mappings and stats
-            self.save_mappings(mappings)
-            self.save_stats(stats)
+            # Update ProcessedFile record
+            processed_file.records_processed = len(df)
+            processed_file.fields_tokenized = fields_tokenized
+            processed_file.status = 'success'
+            processed_file.processed_at = datetime.utcnow()
+            processed_file.processing_time = int((time.time() - start_time) * 1000)
+            db_session.commit()
             
             # Log sample
             logging.info("Sample of processed data:")
@@ -147,6 +165,16 @@ class FileProcessor:
             
         except Exception as e:
             logging.error(f"Error processing file: {str(e)}")
+            if 'processed_file' in locals():
+                processed_file.status = 'error'
+                processed_file.error_message = str(e)
+                processed_file.processed_at = datetime.utcnow()
+                processed_file.processing_time = int((time.time() - start_time) * 1000)
+                db_session.commit()
+            return False
+            
+        except Exception as e:
+            logging.error(f"Error processing file: {str(e)}")
             return False
 
 if __name__ == "__main__":
@@ -155,15 +183,16 @@ if __name__ == "__main__":
         logging.info(f"Looking for CSV files in {processor.input_dir}")
         
         # Process any CSV files in input directory
-        files = os.listdir(processor.input_dir)
-        logging.info(f"Found files: {files}")
-        
-        for filename in files:
-            if filename.endswith('.csv'):
+        files = [f for f in os.listdir(processor.input_dir) if f.endswith('.csv')]
+        if files:
+            logging.info(f"Found CSV files: {files}")
+            for filename in files:
                 logging.info(f"Processing CSV file: {filename}")
                 processor.process_file(filename)
-            else:
-                logging.info(f"Skipping non-CSV file: {filename}")
+        else:
+            logging.info("No CSV files found in input directory")
+            
     except Exception as e:
         logging.error(f"Error in main: {str(e)}")
+        import traceback
         logging.error(traceback.format_exc())

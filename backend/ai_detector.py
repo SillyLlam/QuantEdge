@@ -32,20 +32,16 @@ class SensitivityDetector:
 
     def _load_pretrained_weights(self):
         """In production, load pretrained weights"""
-        # This would load pretrained weights
         pass
 
     def _preprocess_text(self, text: str) -> np.ndarray:
         """Convert text to numerical features"""
-        # Simple preprocessing - convert to lowercase and pad/truncate
         text = str(text).lower()
-        # Pad or truncate to 100 characters
         if len(text) > 100:
             text = text[:100]
         else:
             text = text.ljust(100)
         
-        # Convert to numerical values (simple ASCII values for demo)
         return np.array([ord(c) for c in text]) / 255.0
 
     def _pattern_match(self, text: str) -> bool:
@@ -60,34 +56,28 @@ class SensitivityDetector:
         sensitive_fields = []
 
         for field, value in data.items():
-            # Skip None values
             if value is None:
                 continue
 
-            # Convert value to string for processing
             value_str = str(value)
 
-            # Check pattern matching first (faster)
             if self._pattern_match(value_str):
                 sensitive_fields.append(field)
                 continue
 
-            # If no pattern match, use AI model
             features = self._preprocess_text(value_str)
             prediction = self.model.predict(features.reshape(1, -1), verbose=0)[0][0]
             
-            if prediction > 0.5:  # Threshold for sensitivity
+            if prediction > 0.5:  
                 sensitive_fields.append(field)
 
         return sensitive_fields
 
     def train(self, training_data: List[Dict], labels: List[bool]):
         """Train the model on new data"""
-        # Preprocess training data
         X = np.array([self._preprocess_text(str(d)) for d in training_data])
         y = np.array(labels)
 
-        # Train the model
         self.model.fit(X, y, epochs=5, batch_size=32, validation_split=0.2)
 
     def save_model(self, path: str):

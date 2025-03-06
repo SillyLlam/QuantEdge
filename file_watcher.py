@@ -96,28 +96,35 @@ class CSVHandler(FileSystemEventHandler):
             logging.error(f"Error loading mappings: {str(e)}")
             return {}
     
-    def save_mappings(self, mappings):
+    def save_mappings(self, new_mappings):
         """Save token mappings to file"""
         try:
             # Ensure the mappings is a dictionary
-            if not isinstance(mappings, dict):
-                mappings = {}
+            if not isinstance(new_mappings, dict):
+                new_mappings = {}
             
             # Load existing mappings
             existing_mappings = self.load_mappings()
             
-            # Update with new mappings
-            for field, values in mappings.items():
+            # Update existing mappings with new ones
+            for field, field_mappings in new_mappings.items():
                 if field not in existing_mappings:
                     existing_mappings[field] = {}
-                existing_mappings[field].update(values)
+                existing_mappings[field].update(field_mappings)
+            
+            # Convert all values to strings for JSON serialization
+            serializable_mappings = {}
+            for field, field_mappings in existing_mappings.items():
+                serializable_mappings[field] = {
+                    str(k): str(v) for k, v in field_mappings.items()
+                }
             
             # Save updated mappings
             with open(self.mappings_file, 'w') as f:
-                json.dump(existing_mappings, f, indent=4)
-            logging.info("Saved mappings successfully")
+                json.dump(serializable_mappings, f, indent=4)
+            logging.info(f"Updated mappings for fields: {list(existing_mappings.keys())}")
         except Exception as e:
-            logging.error(f"Error saving mappings: {str(e)}")
+            logging.error(f"Error saving mappings: {str(e)}\n{traceback.format_exc()}")
 
     def on_created(self, event):
         logging.info(f"File system event detected: {event.event_type} - {event.src_path}")
@@ -158,7 +165,7 @@ class CSVHandler(FileSystemEventHandler):
             df = pd.read_csv(file_path)
             logging.info(f"Read {len(df)} rows from {filename}")
             
-            # Load mappings and stats
+            # Load existing mappings and stats
             mappings = self.load_mappings()
             stats = self.load_stats()
             
@@ -168,6 +175,8 @@ class CSVHandler(FileSystemEventHandler):
             
             # Process each field
             processed_df = df.copy()
+            new_mappings = {}
+            
             for field in df.columns:
                 # Update stats
                 if field not in stats['sensitive_fields_found']:
@@ -177,20 +186,25 @@ class CSVHandler(FileSystemEventHandler):
                 # Process field based on rules
                 if field in rules['tokenize']:
                     logging.info(f"Tokenizing field: {field}")
-                    if field not in mappings:
-                        mappings[field] = {}
+                    if field not in new_mappings:
+                        new_mappings[field] = {}
                     
                     # Tokenize each unique value
-                    for value in df[field].unique():
-                        if pd.notna(value):
-                            value_str = str(value)
-                            if value_str not in mappings[field]:
-                                token = self.generate_quantum_token(field, value_str)
-                                mappings[field][value_str] = token
-                                logging.info(f"New token for {field}: {value_str} -> {token}")
-                            
-                            # Replace value with token
-                            processed_df.loc[df[field] == value, field] = mappings[field][value_str]
+                    for value in df[field].dropna().unique():
+                        value_str = str(value)
+                        
+                        # Check if value already has a token in existing mappings
+                        if field in mappings and value_str in mappings[field]:
+                            token = mappings[field][value_str]
+                        else:
+                            token = self.generate_quantum_token(field, value_str)
+                        
+                        # Store the mapping
+                        new_mappings[field][value_str] = token
+                        logging.info(f"Token for {field}: {value_str} -> {token}")
+                        
+                        # Replace value with token
+                        processed_df.loc[df[field] == value, field] = token
                 else:
                     logging.info(f"Passing through field: {field}")
             
@@ -199,23 +213,16 @@ class CSVHandler(FileSystemEventHandler):
             processed_df.to_csv(output_path, index=False)
             logging.info(f"Saved processed file to: {output_path}")
             
-            # Archive original file
-            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-            archive_path = os.path.join(self.archive_dir, f"{timestamp}_{filename}")
-            shutil.move(file_path, archive_path)
-            logging.info(f"Archived original file to: {archive_path}")
-            
-            # Save mappings and stats
-            self.save_mappings(mappings)
+            # Save new mappings and stats
+            self.save_mappings(new_mappings)
             self.save_stats(stats)
             
-            # Log sample of processed data
-            logging.info("Sample of processed data:")
-            for field in processed_df.columns:
-                sample = processed_df[field].head(2).tolist()
-                logging.info(f"{field}: {sample}")
+            # Move original file to archive
+            archive_path = os.path.join(self.archive_dir, filename)
+            shutil.move(file_path, archive_path)
+            logging.info(f"Moved original file to archive: {archive_path}")
             
-            logging.info(f"Successfully processed {filename}")
+            logging.info(f"Successfully processed file: {filename}")
         except Exception as e:
             logging.error(f"Error in process_file: {str(e)}")
             logging.error(traceback.format_exc())

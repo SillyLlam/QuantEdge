@@ -24,3 +24,5 @@ python-snappy==0.6.1
 fastparquet==2024.2.0
 distributed==2024.1.1
 msgpack==1.0.7
+websockets==12.0
+fastapi-socketio==0.2.1
